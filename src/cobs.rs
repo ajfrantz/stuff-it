@@ -39,6 +39,34 @@ pub fn encode(src: &[u8], dst: &mut [u8]) -> Result<usize, ()> {
     }
 }
 
+pub fn decode(buffer: &mut [u8]) -> Result<&[u8], ()> {
+    let mut read_idx = 0;
+    let mut write_idx = 0;
+
+    let input_len = buffer.len();
+    while read_idx < input_len {
+        let block_len = buffer[read_idx] as usize;
+        read_idx += 1;
+
+        if block_len > 1 {
+            let copy_len = block_len - 1;
+            if read_idx + copy_len > input_len {
+                return Err(());
+            }
+            buffer.copy_within(read_idx..read_idx + copy_len, write_idx);
+            read_idx += copy_len;
+            write_idx += copy_len;
+        }
+
+        if block_len != 0xff && read_idx < input_len {
+            buffer[write_idx] = 0;
+            write_idx += 1;
+        }
+    }
+
+    Ok(&buffer[..write_idx])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -128,6 +156,17 @@ mod tests {
                 i
             );
             assert_eq!(example.output, output_buf, "example {}", i);
+        }
+    }
+
+    #[test]
+    fn test_decode_examples() {
+        for (i, example) in examples().iter().enumerate() {
+            let mut buffer = example.output.clone();
+            let result = decode(&mut buffer);
+
+            let expected: &[u8] = &example.input;
+            assert_eq!(Ok(expected), result, "example {}", i);
         }
     }
 }
