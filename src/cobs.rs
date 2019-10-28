@@ -3,47 +3,40 @@ pub fn encode(src: &[u8], dst: &mut [u8]) -> Result<usize, ()> {
         return Ok(0);
     }
 
-    let src_len = src.len();
-    let mut read_idx = 0;
-    let mut write_idx = 0;
+    let mut block_start_idx = 0;
+    let mut next_data_idx = 1;
+    let mut block_len = 1;
+    let mut skip_last = false;
 
-    let mut zero_idx = 0;
-    while zero_idx < src_len && src[zero_idx] != 0 {
-        zero_idx += 1;
-    }
+    for &b in src {
+        skip_last = false;
 
-    while read_idx < src_len {
-        let block_end = zero_idx;
-        let block_len = (block_end - read_idx).min(254);
+        if b == 0 {
+            *dst.get_mut(block_start_idx).ok_or(())? = block_len;
+            block_start_idx = next_data_idx;
+            next_data_idx += 1;
+            block_len = 1;
+        } else {
+            *dst.get_mut(next_data_idx).ok_or(())? = b;
+            next_data_idx += 1;
+            block_len += 1;
 
-        let write_end = write_idx + 1 + block_len;
-        if write_end > dst.len() {
-            return Err(());
-        }
-
-        dst[write_idx] = (block_len + 1) as u8;
-        dst[write_idx + 1..write_end].copy_from_slice(&src[read_idx..read_idx + block_len]);
-
-        read_idx += block_len;
-        write_idx = write_end;
-
-        if block_len != 254 {
-            read_idx += 1;
-            zero_idx += 1;
-            while zero_idx < src_len && src[zero_idx] != 0 {
-                zero_idx += 1;
+            if block_len == 0xff {
+                *dst.get_mut(block_start_idx).ok_or(())? = block_len;
+                block_start_idx = next_data_idx;
+                next_data_idx += 1;
+                block_len = 1;
+                skip_last = true;
             }
         }
     }
 
-    // If our input happened to end in a zero, we have to go out of our way to encode the
-    // "phantom zero" at the end.
-    if src[src_len - 1] == 0 {
-        dst[write_idx] = 1;
-        write_idx += 1;
+    if skip_last {
+        Ok(next_data_idx - 1)
+    } else {
+        *dst.get_mut(block_start_idx).ok_or(())? = block_len;
+        Ok(next_data_idx)
     }
-
-    Ok(write_idx)
 }
 
 pub fn decode(buffer: &mut [u8]) -> Result<&[u8], ()> {
