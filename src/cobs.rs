@@ -1,70 +1,42 @@
-struct BlockIter<'a> {
-    slice: Option<&'a [u8]>,
-    next_zero: Option<usize>,
-}
-
-fn cobs_blocks<'a>(slice: &'a [u8]) -> BlockIter<'a> {
-    BlockIter {
-        slice: Some(slice),
-        next_zero: slice.iter().position(|&b| b == 0),
-    }
-}
-
-impl<'a> Iterator for BlockIter<'a> {
-    type Item = &'a [u8];
-
-    fn next(&mut self) -> Option<&'a [u8]> {
-        self.slice.map(|slice| {
-            // Peel off up to 254 non-zero bytes as the block contents.
-            match self.next_zero {
-                Some(zero_idx) if zero_idx < 254 => {
-                    // There's a zero within the next 254 bytes which determines where we stop.
-                    let (block, remain) = slice.split_at(zero_idx);
-                    // Skip the zero itself; we never explicitly output those as part of a block.
-                    let remain = &remain[1..];
-                    self.slice = Some(remain);
-                    self.next_zero = remain.iter().position(|&b| b == 0);
-                    block
-                }
-                _ => {
-                    // There was no terminating zero in the next 254 bytes; output as many bytes as are
-                    // left (up to a max-length block) and adjust the remainder.
-                    if slice.len() <= 254 {
-                        // Take the rest of the input and mark us as complete.
-                        self.slice = None;
-                        slice
-                    } else {
-                        // There's more to go, just take a full block's worth of non-zero bytes.
-                        let (block, remain) = slice.split_at(254);
-                        self.slice = Some(remain);
-                        self.next_zero = self.next_zero.map(|idx| idx - 254);
-                        block
-                    }
-                }
-            }
-        })
-    }
-}
-
 pub fn encode(src: &[u8], dst: &mut [u8]) -> Result<usize, ()> {
-    let dst_len = dst.len();
-    let mut out_idx = 0;
-
-    for block in cobs_blocks(src) {
-        let len = block.len();
-        let dst_begin = out_idx + 1;
-        let dst_end = out_idx + 1 + len;
-
-        if dst_end > dst_len {
-            return Err(());
-        }
-
-        dst[out_idx] = (len + 1) as u8;
-        dst[dst_begin..dst_end].copy_from_slice(block);
-        out_idx += len + 1;
+    if src.is_empty() {
+        return Ok(0);
     }
 
-    Ok(out_idx)
+    let mut block_start_idx = 0;
+    let mut next_data_idx = 1;
+    let mut block_len = 1;
+    let mut skip_last = false;
+
+    for &b in src {
+        skip_last = false;
+
+        if b == 0 {
+            *dst.get_mut(block_start_idx).ok_or(())? = block_len;
+            block_start_idx = next_data_idx;
+            next_data_idx += 1;
+            block_len = 1;
+        } else {
+            *dst.get_mut(next_data_idx).ok_or(())? = b;
+            next_data_idx += 1;
+            block_len += 1;
+
+            if block_len == 0xff {
+                *dst.get_mut(block_start_idx).ok_or(())? = block_len;
+                block_start_idx = next_data_idx;
+                next_data_idx += 1;
+                block_len = 1;
+                skip_last = true;
+            }
+        }
+    }
+
+    if skip_last {
+        Ok(next_data_idx - 1)
+    } else {
+        *dst.get_mut(block_start_idx).ok_or(())? = block_len;
+        Ok(next_data_idx)
+    }
 }
 
 #[cfg(test)]
@@ -80,20 +52,16 @@ mod tests {
         vec![
             // Short sequences
             Example {
-                input: vec![10, 11, 0, 12],
-                output: vec![3, 10, 11, 2, 12],
+                input: vec![],
+                output: vec![],
             },
             Example {
-                input: vec![0, 0, 1, 0],
-                output: vec![1, 1, 2, 1, 1],
+                input: vec![42],
+                output: vec![2, 42],
             },
             Example {
-                input: vec![255, 0],
-                output: vec![2, 255, 1],
-            },
-            Example {
-                input: vec![1],
-                output: vec![2, 1],
+                input: vec![0, 1, 0],
+                output: vec![1, 2, 1, 1],
             },
             // Paper's example
             Example {
