@@ -1,3 +1,12 @@
+pub fn max_encoded_len(raw_len: usize) -> usize {
+    let max_overhead = match raw_len {
+        0 => 0,
+        _ => 1 + ((raw_len - 1) / 254),
+    };
+
+    raw_len + max_overhead
+}
+
 pub fn encode(src: &[u8], dst: &mut [u8]) -> Result<usize, ()> {
     if src.is_empty() {
         return Ok(0);
@@ -171,25 +180,11 @@ mod tests {
         }
     }
 
-    trait DivCeilExt {
-        fn div_ceil(self, other: Self) -> Self;
-    }
-
-    impl DivCeilExt for usize {
-        fn div_ceil(self, other: Self) -> Self {
-            match self {
-                0 => 0,
-                _ => 1 + ((self - 1) / other),
-            }
-        }
-    }
-
     proptest! {
         #[test]
         fn encode_props(ref data in any::<Vec<u8>>()) {
             // Should add no more than 1 byte per 254 bytes of input.
-            let max_size = data.len() + data.len().div_ceil(254);
-            let mut output = vec![0; max_size];
+            let mut output = vec![0; max_encoded_len(data.len())];
 
             let result = encode(&data, &mut output);
 
