@@ -10,6 +10,7 @@ edition = "2018"
 
 [dev-dependencies]
 criterion = "0.3"
+proptest = "0.9"
 
 [[bench]]
 name = "cobs_performance"

@@ -70,6 +70,7 @@ pub fn decode(buffer: &mut [u8]) -> Result<&[u8], ()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     struct Example {
         input: Vec<u8>,
@@ -167,6 +168,53 @@ mod tests {
 
             let expected: &[u8] = &example.input;
             assert_eq!(Ok(expected), result, "example {}", i);
+        }
+    }
+
+    trait DivCeilExt {
+        fn div_ceil(self, other: Self) -> Self;
+    }
+
+    impl DivCeilExt for usize {
+        fn div_ceil(self, other: Self) -> Self {
+            match self {
+                0 => 0,
+                _ => 1 + ((self - 1) / other),
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn encode_props(ref data in any::<Vec<u8>>()) {
+            // Should add no more than 1 byte per 254 bytes of input.
+            let max_size = data.len() + data.len().div_ceil(254);
+            let mut output = vec![0; max_size];
+
+            let result = encode(&data, &mut output);
+
+            // We allocated enough space that this should always succeed.
+            assert!(result.is_ok());
+            let output = &output[..result.unwrap()];
+
+            // If we had data, we should have gotten more bytes out than in.
+            if !data.is_empty() {
+                assert!(output.len() > data.len());
+            }
+
+            // The output should never include a zero.
+            assert!(!output.iter().any(|&b| b == 0));
+        }
+
+        #[test]
+        fn round_trip(ref data in any::<Vec<u8>>()) {
+            let mut buffer = vec![0; 2 * data.len()];
+
+            let encoded_len = encode(&data, &mut buffer).unwrap();
+            let decoded = decode(&mut buffer[..encoded_len]).unwrap();
+
+            // We should always get the same data back out.
+            assert_eq!(data, &decoded);
         }
     }
 }
